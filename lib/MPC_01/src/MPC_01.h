@@ -3,33 +3,30 @@
 #include <AltSoftSerial.h>
 #include <TMCStepper.h>
 
+class TMC2209Manager;
 
 class MPC_01{
     public:
-    /*
-        MPC_01(uint8_t mX, uint8_t mY, uint8_t mZ, uint8_t mA, uint8_t mS)
-            : maxX(mX), maxY(mY), maxZ(mZ), maxAcceleration(mA), maxSpeed(mS)
-        {}
-            */
-
-        void begin(uint16_t rms_mA = 800, uint8_t microsteps = 16);
-        bool setupTMC2209(uint16_t rms_mA, uint8_t microsteps);
-        void enableDrivers(bool on);
-
-        // Debug / Diagnose
-        bool testTMC();
+        void begin(uint16_t rms_mA, uint8_t microsteps);
+        
+        uint8_t setMaxX();
+        uint8_t setMaxY();
+        uint8_t setMaxZ();
 
         uint8_t getMaxX();
         uint8_t getMaxY();
         uint8_t getMaxZ();
 
-        enum class CoordMotion : uint8_t {   
-            CoreXY, LinearXY
-        };
 
+        enum class CoordMotion : uint8_t {   
+            CoreXY, 
+            LinearXY
+        };
+        CoordMotion motionMode = CoordMotion::LinearXY;
+        void setCoordMotion(CoordMotion mode);
         void calibrate(int8_t Multiplikator);
 
-        void setCoordMotion();
+
         void setAxisTarget(int x, int y, int z, int a);
         void setMoveSpeed(int speed);
 
@@ -51,21 +48,6 @@ class MPC_01{
     //    int8_t currentStateGripper = -1;
     //    int8_t currentStateTurnunit = -1;
 
-    // ----- Pin Mapping (als Member/constexpr) -----
-        static constexpr uint8_t STEP1 = 13; // X
-        static constexpr uint8_t DIR1  = 12;
-
-        static constexpr uint8_t STEP2 = 11; // Y
-        static constexpr uint8_t DIR2  = 10;
-
-        static constexpr uint8_t STEP3 = 5;  // Z
-        static constexpr uint8_t DIR3  = 4;
-
-        static constexpr uint8_t STEP4 = 7;  // A
-        static constexpr uint8_t DIR4  = 6;
-
-        // WICHTIG: NICHT 0/1 verwenden. Nimm einen freien Pin.
-        static constexpr uint8_t EN_PIN = 1;
 
         static constexpr uint8_t SERVO1 = 2;
         static constexpr uint8_t SERVO2 = 3;
@@ -74,11 +56,32 @@ class MPC_01{
         static constexpr uint8_t END_Y = A1;
         static constexpr uint8_t END_Z = A0;
 
+        uint8_t maxX = 0, maxY = 0, maxZ = 0;
+        TMC2209Manager tmc;
+
+};
+
+class TMC2209Manager{
+    public:
+        TMC2209Manager();
+        void beginTMC2209();
+        bool setupTMC2209(uint16_t rms_mA, uint8_t microsteps);
+        void arm();     //toff(4)
+        void disarm();   //toff(0)
+        // Debug / Diagnose
+        bool testTMC();
+
+    private:
+        // ----- Pin Mapping (als Member/constexpr) -----
+        static constexpr uint8_t STEP1 = 13, DIR1 = 12; //X-Achse
+        static constexpr uint8_t STEP2 = 11, DIR2 = 10; //Y-Achse
+        static constexpr uint8_t STEP3 = 5,  DIR3 = 4;  //Z-Achse
+        static constexpr uint8_t STEP4 = 7,  DIR4 = 6;  //Reserve
+
+        static constexpr uint8_t EN_STATUS_PIN = 12;
         static constexpr float R_SENSE = 0.11f; // ggf. 0.075f (BTT-Shunt prüfen)
-        
         // ----- UART & Treiber-Objekte müssen dauerhaft existieren -----
         AltSoftSerial tmcSerial;
-
         TMC2209Stepper drv0;
         TMC2209Stepper drv1;
         TMC2209Stepper drv2;
@@ -87,8 +90,4 @@ class MPC_01{
         // interne Helfer
         void setupOneDriver(TMC2209Stepper &d, uint16_t rms_mA, uint8_t microsteps);
         bool commOK(TMC2209Stepper &d, const char* name);
-
-        uint8_t maxX = 0, maxY = 0, maxZ = 0;
-
 };
-
