@@ -1,0 +1,21 @@
+﻿{
+    "name":  "MPC_01",
+    "version":  "1.0.0",
+    "description":  "A Libaray for the MPC-01 Shieled, so everybody can easyly controll a small Machine with XYZ Axis and a Gripper and an Turning unit.",
+    "keywords":  "technic, KTLA, Litec, Schulprojekt",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "https://github.com/Kappi084/CellCTRL.git"
+                   },
+    "authors":  [
+                    {
+                        "name":  "Jona Kappler",
+                        "email":  "jona.kappler05@gmail.com",
+                        "url":  "-"
+                    }
+                ],
+    "license":  "MIT",
+    "homepage":  "-",
+    "frameworks":  "*",
+    "platforms":  "*"
+}
