@@ -1,11 +1,6 @@
 #include "MPC_01.h"
 
 
-
-
-
-
-
 void MPC_01::begin(uint16_t rms_mA, uint8_t microsteps){
 
     pinMode(END_X, INPUT_PULLUP);
@@ -29,6 +24,10 @@ void MPC_01::begin(uint16_t rms_mA, uint8_t microsteps){
     tmc.beginTMC2209();
     tmc.setupTMC2209(rms_mA, microsteps);
 
+    i2c.setDebug(true);
+    i2c.begin(10000);
+    i2c.scan();
+
 }
 
 void MPC_01::setCoordMotion(CoordMotion mode) {
@@ -38,17 +37,23 @@ void MPC_01::setCoordMotion(CoordMotion mode) {
 void MPC_01::setAxisTarget(int x, int y, int z, int a) {
     int motor1 = 0;
     int motor2 = 0;
+    int motor3 = 0;
+    int motor4 = 0;
 
     switch (motionMode)
     {
     case CoordMotion::LinearXY:
         motor1 = x;
         motor2 = y;
+        motor3 = z;
+        motor4 = a;
         break;
 
     case CoordMotion::CoreXY:
         motor1 = x + y;
         motor2 = x - y;
+        motor3 = z;
+        motor4 = a;
         break;
     
     default:
@@ -58,8 +63,7 @@ void MPC_01::setAxisTarget(int x, int y, int z, int a) {
 }
 
 void MPC_01::calibrate(int8_t Multiplikator){
-
-    
+        
 }
 
 uint8_t MPC_01::getMaxX(){    
@@ -71,6 +75,22 @@ uint8_t MPC_01::getMaxY(){
 uint8_t MPC_01::getMaxZ(){    
     return maxZ;
 }
+
+bool MPC_01::setStatus(uint8_t mode) {
+  return i2c.writeBytes(0x10, &mode, 1);
+}
+
+void MPC_01::setservo(uint8_t ch, uint16_t pulse){
+  pca.setPWM(ch, 0, pulse);
+
+}
+
+void MPC_01::beginServo(){
+            pca.begin();
+            pca.setPWMFreq(50);
+        }
+
+
 
 // - - - - - - - - - - TMC2209Manager - - - - - - - - - -
 
@@ -151,3 +171,107 @@ void TMC2209Manager::disarm() {
   drv2.toff(0);
   drv3.toff(0);
 }
+
+//- - - - - - - - - - I2CManager - - - - - - - - - -
+
+void I2CManager::begin(uint32_t clockHz) {
+  Wire.begin();                // SDA/SCL automatisch (A4/A5 am ATmega328P)
+  Wire.setClock(clockHz);      // 100k oder 400k
+
+  if (debug_) {
+    Serial.print(F("I2C started, clock="));
+    Serial.println(clockHz);
+  }
+}
+void I2CManager::setDebug(bool on) {
+  debug_ = on;
+}
+void I2CManager::dbgPrint_(const __FlashStringHelper* s) {
+  if (!debug_) return;
+  Serial.print(s);
+}
+void I2CManager::dbgPrintHex_(uint8_t v) {
+  if (!debug_) return;
+  if (v < 16) Serial.print('0');
+  Serial.print(v, HEX);
+}
+bool I2CManager::ping(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return (Wire.endTransmission() == 0);
+}
+void I2CManager::scan() {
+  if (!debug_) return;
+
+  Serial.println(F("I2C scan..."));
+  uint8_t found = 0;
+
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    uint8_t err = Wire.endTransmission();
+
+    if (err == 0) {
+      Serial.print(F("Found 0x"));
+      dbgPrintHex_(addr);
+      Serial.println();
+      found++;
+    }
+  }
+
+  Serial.print(F("Devices found: "));
+  Serial.println(found);
+}
+bool I2CManager::writeBytes(uint8_t addr, const uint8_t* data, size_t len) {
+  Wire.beginTransmission(addr);
+  for (size_t i = 0; i < len; i++) Wire.write(data[i]);
+  return (Wire.endTransmission() == 0);
+}
+bool I2CManager::readBytes(uint8_t addr, uint8_t* data, size_t len) {
+  size_t got = Wire.requestFrom((int)addr, (int)len);
+  if (got != len) return false;
+
+  for (size_t i = 0; i < len; i++) data[i] = Wire.read();
+  return true;
+}
+bool I2CManager::writeReg8(uint8_t addr, uint8_t reg, uint8_t value) {
+  uint8_t buf[2] = { reg, value };
+  return writeBytes(addr, buf, sizeof(buf));
+}
+bool I2CManager::writeReg16(uint8_t addr, uint8_t reg, uint16_t value, bool msbFirst) {
+  uint8_t buf[3];
+  buf[0] = reg;
+  if (msbFirst) {
+    buf[1] = (uint8_t)(value >> 8);
+    buf[2] = (uint8_t)(value & 0xFF);
+  } else {
+    buf[1] = (uint8_t)(value & 0xFF);
+    buf[2] = (uint8_t)(value >> 8);
+  }
+  return writeBytes(addr, buf, sizeof(buf));
+}
+bool I2CManager::readReg8(uint8_t addr, uint8_t reg, uint8_t &value) {
+  // register pointer setzen
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false; // repeated start
+
+  // 1 Byte lesen
+  if (Wire.requestFrom((int)addr, 1) != 1) return false;
+  value = Wire.read();
+  return true;
+}
+bool I2CManager::readRegBytes(uint8_t addr, uint8_t reg, uint8_t* data, size_t len) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+
+  size_t got = Wire.requestFrom((int)addr, (int)len);
+  if (got != len) return false;
+
+  for (size_t i = 0; i < len; i++) data[i] = Wire.read();
+  return true;
+}
+
+
+
+
+
