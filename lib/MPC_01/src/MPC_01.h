@@ -4,6 +4,8 @@
 #include <TMCStepper.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include <SoftwareSerial.h>
+#include <AccelStepper.h>
 
 class TMC2209Manager;
 class I2CManager;
@@ -28,24 +30,38 @@ class MPC_01{
         CoordMotion motionMode = CoordMotion::LinearXY;
         void setCoordMotion(CoordMotion mode);
         void calibrate(int8_t Multiplikator);
+        void homing();
 
-        void setAxisTarget(int x, int y, int z, int a);
+        void setAxisTarget(int x, int y, int z);
         void setMoveSpeed(int speed);
+        void setMoveAcceleration(int accel);
+
         void setGripper(bool state);
         void setTurnValue(int Turnval);
         void setTurnSpeed(int speed);
 
+        void applyMotionStepper();
+        void updateMotion();
+        bool isMoving();
+        void moveToSync();
+
         bool setStatus(uint8_t mode);
         void setservo(uint8_t ch, uint16_t pulse);
 
-        void beginServo();
-
+        void sendRS485Text(const char* text);
+        void updateRS485();
 
 
     private:
         uint8_t maxAcceleration; //0-100%
         uint8_t maxSpeed;   //0-100%
-
+        uint8_t xConstant;
+        uint8_t yConstant;
+        uint8_t zConstant;
+        long motor1;
+        long motor2;
+        long motor3;
+        
         uint8_t currentSpeed = 0;
         uint8_t currentAcceleration = 0;
         int8_t currentPositionX = -1;
@@ -55,17 +71,31 @@ class MPC_01{
     //    int8_t currentStateGripper = -1;
     //    int8_t currentStateTurnunit = -1;
 
-        static constexpr uint8_t SERVO1 = 2;
-        static constexpr uint8_t SERVO2 = 3;
-
-        static constexpr uint8_t END_X = A2;
-        static constexpr uint8_t END_Y = A1;
-        static constexpr uint8_t END_Z = A0;
+        static constexpr uint8_t NCXpin = A2;   //Endstop X
+        static constexpr uint8_t NCYpin = A1;   //Endstop Y
+        static constexpr uint8_t NCZpin = A0;   //Endstop Z
 
         uint8_t maxX = 0, maxY = 0, maxZ = 0;
+
         TMC2209Manager tmc;
         I2CManager i2c;
         Adafruit_PWMServoDriver pca = Adafruit_PWMServoDriver(0x40);
+        RS485Manager rs485 {11, 10, A3};
+
+        AccelStepper stepperX;
+        AccelStepper stepperY;
+        AccelStepper stepperZ;
+
+
+        // ----- Pin Mapping (als Member/constexpr) -----
+        static constexpr uint8_t STEP1 = 7, DIR1 = 6; //(Motor 1) X-Achse
+        static constexpr uint8_t STEP2 = 5, DIR2 = 4; //(Motor 2) Y-Achse
+        static constexpr uint8_t STEP3 = 3,  DIR3 = 2;  //(Motor 3) Z-Achse
+
+        float maxSpeedSteps = 800.0;
+        float accelSteps = 400.0;
+        int8_t isEStopActive;
+
 };
 
 class TMC2209Manager{
@@ -83,7 +113,6 @@ class TMC2209Manager{
         static constexpr uint8_t STEP1 = 13, DIR1 = 12; //X-Achse
         static constexpr uint8_t STEP2 = 11, DIR2 = 10; //Y-Achse
         static constexpr uint8_t STEP3 = 5,  DIR3 = 4;  //Z-Achse
-        static constexpr uint8_t STEP4 = 7,  DIR4 = 6;  //Reserve
 
         static constexpr uint8_t EN_STATUS_PIN = 12;
         static constexpr float R_SENSE = 0.11f; // ggf. 0.075f (BTT-Shunt prüfen)
@@ -92,7 +121,6 @@ class TMC2209Manager{
         TMC2209Stepper drv0;
         TMC2209Stepper drv1;
         TMC2209Stepper drv2;
-        TMC2209Stepper drv3;
 
         // interne Helfer
         void setupOneDriver(TMC2209Stepper &d, uint16_t rms_mA, uint8_t microsteps);
@@ -126,10 +154,23 @@ class I2CManager{
 
 class RS485Manager{
     public:
+        RS485Manager(uint8_t rxPin, uint8_t txPin, uint8_t deRePin);
+
+        void begin(unsigned long baud = 19200);
+
+        void sendByte(uint8_t data);
+        void sendBytes(const uint8_t* data, size_t len);
+        void sendText(const char* text);
+
+        bool available();
+        int read();
 
     private:
+        SoftwareSerial rs485Serial;
+        uint8_t deRePin_;
 
-
+        void setTransmitMode();
+        void setReceiveMode();
 };
 
 

@@ -1,69 +1,144 @@
 #include "MPC_01.h"
 
 
+MPC_01::MPC_01()
+: stepperX(AccelStepper::DRIVER, STEP1, DIR1),
+  stepperY(AccelStepper::DRIVER, STEP2, DIR2),
+  stepperZ(AccelStepper::DRIVER, STEP3, DIR3)
+{
+}
+
 void MPC_01::begin(uint16_t rms_mA, uint8_t microsteps){
 
-    pinMode(END_X, INPUT_PULLUP);
-    pinMode(END_Y, INPUT_PULLUP);
-    pinMode(END_Z, INPUT_PULLUP);
-
-    const int Servo1pin = 2; //Servo 1 (Turning Unit)
-    const int Servo2pin = 3; //Servo 2 (Gripper)
-
-    const int NCXpin = A2;  //Endstop X
-    const int NCYpin = A1;  //Endstop Y
-    const int NCZpin = A0;  //Endstop Z
-
-    const int PGOOD = 0;
-
-
-    const int RS485_RX = A5;
-    const int RS485_TX = A4;
-    const int RS485_DERE = A3;
+    pinMode(NCXpin, INPUT_PULLUP);
+    pinMode(NCYpin, INPUT_PULLUP);
+    pinMode(NCZpin, INPUT_PULLUP);
     
     tmc.beginTMC2209();
     tmc.setupTMC2209(rms_mA, microsteps);
 
+    stepperX.setMaxSpeed(maxSpeedSteps);
+    stepperY.setMaxSpeed(maxSpeedSteps);
+    stepperZ.setMaxSpeed(maxSpeedSteps);
+
+    stepperX.setAcceleration(accelSteps);
+    stepperY.setAcceleration(accelSteps);
+    stepperZ.setAcceleration(accelSteps);
+
     i2c.setDebug(true);
-    i2c.begin(10000);
+    i2c.begin(100000);
     i2c.scan();
+
+    rs485.begin(19200);
 
 }
 
 void MPC_01::setCoordMotion(CoordMotion mode) {
     motionMode = mode;
 }
+void MPC_01::setAxisTarget(int x, int y, int z) {
+  if (x > maxX) return;
+  if (y > maxY) return;
+  if (z > maxZ) return;
 
-void MPC_01::setAxisTarget(int x, int y, int z, int a) {
-    int motor1 = 0;
-    int motor2 = 0;
-    int motor3 = 0;
-    int motor4 = 0;
+  int targetX = x * xConstant;
+  int targetY = y * yConstant;
+  int targetZ = z * zConstant;
 
-    switch (motionMode)
-    {
+  switch (motionMode) {
     case CoordMotion::LinearXY:
-        motor1 = x;
-        motor2 = y;
-        motor3 = z;
-        motor4 = a;
+        motor1 = targetX;
+        motor2 = targetY;
+        motor3 = targetZ;
+        Serial.println("Motion System LinearXY selected!");
         break;
 
     case CoordMotion::CoreXY:
-        motor1 = x + y;
-        motor2 = x - y;
-        motor3 = z;
-        motor4 = a;
+        motor1 = targetX + targetY;
+        motor2 = targetX - targetY;
+        motor3 = targetZ;
+        Serial.println("Motion System CoreXY selected!");
         break;
     
     default:
         Serial.println("No Motion System selected!");
         break;
     }
+    moveToSync();
+}
+void MPC_01::setMoveSpeed(int speed){
+  if (speed < 1) speed = 1;
+  maxSpeedSteps = speed;
+
+  stepperX.setMaxSpeed(maxSpeedSteps);
+  stepperY.setMaxSpeed(maxSpeedSteps);
+  stepperZ.setMaxSpeed(maxSpeedSteps);
+}
+void MPC_01::setMoveAcceleration(int accel){
+  if (accel < 1) accel = 1;
+  accelSteps = accel;
+
+  stepperX.setAcceleration(accelSteps);
+  stepperY.setAcceleration(accelSteps);
+  stepperZ.setAcceleration(accelSteps);  
+}
+
+void MPC_01::applyMotionStepper(){
+  updateMotion();
+  isMoving();
+
+}
+void MPC_01::updateMotion(){
+  if (isEStopActive()) {
+    return;
+  }
+
+  stepperX.run();
+  stepperY.run();
+  stepperZ.run();
+}
+bool MPC_01::isMoving(){
+  return stepperX.distanceToGo() != 0 ||
+         stepperY.distanceToGo() != 0 ||
+         stepperZ.distanceToGo() != 0;
+
+}
+void MPC_01::moveToSync(){
+  long d1 = labs(motor1 - stepperX.currentPosition());
+  long d2 = labs(motor2 - stepperX.currentPosition());
+  long d3 = labs(motor3 - stepperX.currentPosition());
+
+  long maxDist = d1;
+  if (d2 > maxDist) maxDist = d2;
+  if (d3 > maxDist) maxDist = d3;
+
+  if (maxDist == 0) return;
+
+  stepperX.setMaxSpeed(maxSpeedSteps * (float)d1 / maxDist);
+  stepperY.setMaxSpeed(maxSpeedSteps * (float)d2 / maxDist);
+  stepperZ.setMaxSpeed(maxSpeedSteps * (float)d3 / maxDist);
+
+  stepperX.setAcceleration(accelSteps * (float)d1 / maxDist);
+  stepperY.setAcceleration(accelSteps * (float)d2 / maxDist);
+  stepperZ.setAcceleration(accelSteps * (float)d3 / maxDist);
+
+  stepperX.moveTo(motor1);
+  stepperY.moveTo(motor2);
+  stepperZ.moveTo(motor3);
+  
+  applyMotionStepper();
+
+}
+
+void MPC_01::homing(){
+  // fast seek
+  // backoff
+  // slow seek
+  // backoff
 }
 
 void MPC_01::calibrate(int8_t Multiplikator){
-        
+    
 }
 
 uint8_t MPC_01::getMaxX(){    
@@ -80,17 +155,17 @@ bool MPC_01::setStatus(uint8_t mode) {
   return i2c.writeBytes(0x10, &mode, 1);
 }
 
-void MPC_01::setservo(uint8_t ch, uint16_t pulse){
-  pca.setPWM(ch, 0, pulse);
-
+void MPC_01::sendRS485Text(const char* text) {
+    rs485.sendText(text);
 }
-
-void MPC_01::beginServo(){
-            pca.begin();
-            pca.setPWMFreq(50);
+void MPC_01::updateRS485() {
+    while (rs485.available()) {
+        int c = rs485.read();
+        if (c >= 0) {
+            Serial.write((char)c);   // zum Testen im Serial Monitor ausgeben
         }
-
-
+    }
+}
 
 // - - - - - - - - - - TMC2209Manager - - - - - - - - - -
 
@@ -99,7 +174,6 @@ void TMC2209Manager::beginTMC2209(){
     pinMode(STEP1, OUTPUT); pinMode(DIR1, OUTPUT);
     pinMode(STEP2, OUTPUT); pinMode(DIR2, OUTPUT);
     pinMode(STEP3, OUTPUT); pinMode(DIR3, OUTPUT);
-    pinMode(STEP4, OUTPUT); pinMode(DIR4, OUTPUT);
 
     pinMode(EN_STATUS_PIN, INPUT);
     
@@ -110,7 +184,6 @@ bool TMC2209Manager::setupTMC2209(uint16_t rms_mA, uint8_t microsteps){
     setupOneDriver(drv0, rms_mA, microsteps);
     setupOneDriver(drv1, rms_mA, microsteps);
     setupOneDriver(drv2, rms_mA, microsteps);
-    setupOneDriver(drv3, rms_mA, microsteps);
 
     bool ok = testTMC();
     if (ok) {
@@ -152,24 +225,21 @@ bool TMC2209Manager::testTMC() {
   bool ok0 = commOK(drv0, "DRV0");
   bool ok1 = commOK(drv1, "DRV1");
   bool ok2 = commOK(drv2, "DRV2");
-  bool ok3 = commOK(drv3, "DRV3");
 
   Serial.print("COMM OK: ");
-  Serial.print(ok0); Serial.print(ok1); Serial.print(ok2); Serial.println(ok3);
+  Serial.print(ok0); Serial.print(ok1); Serial.print(ok2);
 
-  return ok0 && ok1 && ok2 && ok3;
+  return ok0 && ok1 && ok2;
 }
 void TMC2209Manager::arm() {
   drv0.toff(4);
   drv1.toff(4);
   drv2.toff(4);
-  drv3.toff(4);
 }
 void TMC2209Manager::disarm() {
   drv0.toff(0);
   drv1.toff(0);
   drv2.toff(0);
-  drv3.toff(0);
 }
 
 //- - - - - - - - - - I2CManager - - - - - - - - - -
@@ -271,7 +341,60 @@ bool I2CManager::readRegBytes(uint8_t addr, uint8_t reg, uint8_t* data, size_t l
   return true;
 }
 
+//- - - - - - - - - - RS485 - - - - - - - - - -
 
+RS485Manager::RS485Manager(uint8_t rxPin, uint8_t txPin, uint8_t deRePin)
+    : rs485Serial(rxPin, txPin), deRePin_(deRePin)
+{
+}
+void RS485Manager::begin(unsigned long baud) {
+    pinMode(deRePin_, OUTPUT);
+    setReceiveMode();
+    rs485Serial.begin(baud);
+}
+void RS485Manager::setTransmitMode() {
+    digitalWrite(deRePin_, HIGH);
+}
+void RS485Manager::setReceiveMode() {
+    digitalWrite(deRePin_, LOW);
+}
+void RS485Manager::sendByte(uint8_t data) {
+    setTransmitMode();
+    delayMicroseconds(20);
 
+    rs485Serial.write(data);
+    rs485Serial.flush();
+
+    delayMicroseconds(20);
+    setReceiveMode();
+}
+void RS485Manager::sendBytes(const uint8_t* data, size_t len) {
+    setTransmitMode();
+    delayMicroseconds(20);
+
+    for (size_t i = 0; i < len; i++) {
+        rs485Serial.write(data[i]);
+    }
+    rs485Serial.flush();
+
+    delayMicroseconds(20);
+    setReceiveMode();
+}
+void RS485Manager::sendText(const char* text) {
+    setTransmitMode();
+    delayMicroseconds(20);
+
+    rs485Serial.print(text);
+    rs485Serial.flush();
+
+    delayMicroseconds(20);
+    setReceiveMode();
+}
+bool RS485Manager::available() {
+    return rs485Serial.available() > 0;
+}
+int RS485Manager::read() {
+    return rs485Serial.read();
+}
 
 
