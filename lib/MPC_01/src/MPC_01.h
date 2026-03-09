@@ -51,6 +51,49 @@ class MPC_01{
         void sendRS485Text(const char* text);
         void updateRS485();
 
+        void startHoming();
+        void updateHoming();
+        bool isHoming();
+        bool isHomed();
+        void stopHoming();
+
+
+        void updateSafety();
+        void emergencyStop();
+        void clearEStop();
+        bool isEStopActive() const;
+
+        enum class HomingState : uint8_t {
+            Idle,
+            Start,
+            checkEndstops,
+
+            HomeX_Fast,
+            HomeX_Backoff,
+            HomeX_Slow,
+
+            HomeY_Fast,
+            HomeY_Backoff,
+            HomeY_Slow,
+
+            HomeZ_Fast,
+            HomeZ_Backoff,
+            HomeZ_Slow,
+
+            Done,
+            Error
+        }
+        homingState = HomingState::Idle;
+
+        bool homingActive = false;
+        bool homedX = false;
+        bool homedY = false;
+        bool homedZ = false;
+        bool homedAll = false;
+
+        bool isXEndstopActive();
+        bool isYEndstopActive();
+        bool isZEndstopActive();
 
     private:
         uint8_t maxAcceleration; //0-100%

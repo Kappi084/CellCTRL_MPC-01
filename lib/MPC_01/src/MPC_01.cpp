@@ -30,8 +30,9 @@ void MPC_01::begin(uint16_t rms_mA, uint8_t microsteps){
     i2c.scan();
 
     rs485.begin(19200);
-
 }
+
+//  Befehle für den Enduser
 
 void MPC_01::setCoordMotion(CoordMotion mode) {
     motionMode = mode;
@@ -83,9 +84,15 @@ void MPC_01::setMoveAcceleration(int accel){
   stepperZ.setAcceleration(accelSteps);  
 }
 
+//  Motion
+
 void MPC_01::applyMotionStepper(){
-  updateMotion();
-  isMoving();
+  while (!isMoving()) {
+    machineState = MachineState::Moving;
+    updateMotion();
+    isMoving();
+  }
+  
 
 }
 void MPC_01::updateMotion(){
@@ -130,12 +137,181 @@ void MPC_01::moveToSync(){
 
 }
 
+//  Homing
+
 void MPC_01::homing(){
-  // fast seek
-  // backoff
-  // slow seek
-  // backoff
+
+
+  startHoming();
+  updateHoming();
 }
+
+void MPC_01::startHoming() {
+  homingActive = true;
+  homedX = false;
+  homedY = false;
+  homedZ = false;
+  homedAll = false;
+
+  homingState = HomingState::Start;
+}
+void MPC_01::updateHoming() {
+    if (!homingActive) return;
+
+    if (isEStopActive()) {
+        stopHoming();
+        homingState = HomingState::Error;
+        return;
+    }
+
+    switch (homingState) {
+
+    case HomingState::Start:
+        stepperX.setMaxSpeed(800);
+        stepperX.setAcceleration(400);
+        stepperY.setMaxSpeed(800);
+        stepperY.setAcceleration(400);
+        stepperZ.setMaxSpeed(800);
+        stepperZ.setAcceleration(400);
+
+        homingState = HomingState::HomeX_Fast;
+        stepperX.moveTo(stepperX.currentPosition() - 100000L);  // weit genug in Minus-Richtung
+        break;
+
+    case HomingState::checkEndstops:
+        if (digitalRead(NCXpin) == LOW) {
+            Serial.println("Error Endstop X already LOW");
+            homingState = HomingState::Error;
+            return;
+        }
+          if (digitalRead(NCYpin) == LOW) {
+            Serial.println("Error Endstop Y already LOW");
+            homingState = HomingState::Error;
+            return;
+        }
+          if (digitalRead(NCZpin) == LOW) {
+            Serial.println("Error Endstop Z already LOW");
+            homingState = HomingState::Error;
+            return;
+        }
+        break;
+
+    case HomingState::HomeX_Fast:
+        stepperX.run();
+        if (isXEndstopActive()) {
+            stepperX.stop();
+            homingState = HomingState::HomeX_Backoff;
+            stepperX.move(400); // etwas wegfahren
+        }
+        break;
+
+    case HomingState::HomeX_Backoff:
+        stepperX.run();
+        if (stepperX.distanceToGo() == 0) {
+            stepperX.setMaxSpeed(200);
+            stepperX.moveTo(stepperX.currentPosition() - 800);
+            homingState = HomingState::HomeX_Slow;
+        }
+        break;
+
+    case HomingState::HomeX_Slow:
+        stepperX.run();
+        if (isXEndstopActive()) {
+            stepperX.stop();
+            stepperX.setCurrentPosition(0);
+            homedX = true;
+
+            stepperY.setMaxSpeed(800);
+            stepperY.moveTo(stepperY.currentPosition() - 100000L);
+            homingState = HomingState::HomeY_Fast;
+        }
+        break;
+
+    case HomingState::HomeY_Fast:
+        stepperY.run();
+        if (isYEndstopActive()) {
+            stepperY.stop();
+            homingState = HomingState::HomeY_Backoff;
+            stepperY.move(400);
+        }
+        break;
+
+    case HomingState::HomeY_Backoff:
+        stepperY.run();
+        if (stepperY.distanceToGo() == 0) {
+            stepperY.setMaxSpeed(200);
+            stepperY.moveTo(stepperY.currentPosition() - 800);
+            homingState = HomingState::HomeY_Slow;
+        }
+        break;
+
+    case HomingState::HomeY_Slow:
+        stepperY.run();
+        if (isYEndstopActive()) {
+            stepperY.stop();
+            stepperY.setCurrentPosition(0);
+            homedY = true;
+
+            stepperZ.setMaxSpeed(800);
+            stepperZ.moveTo(stepperZ.currentPosition() - 100000L);
+            homingState = HomingState::HomeZ_Fast;
+        }
+        break;
+
+    case HomingState::HomeZ_Fast:
+        stepperZ.run();
+        if (isZEndstopActive()) {
+            stepperZ.stop();
+            homingState = HomingState::HomeZ_Backoff;
+            stepperZ.move(400);
+        }
+        break;
+
+    case HomingState::HomeZ_Backoff:
+        stepperZ.run();
+        if (stepperZ.distanceToGo() == 0) {
+            stepperZ.setMaxSpeed(200);
+            stepperZ.moveTo(stepperZ.currentPosition() - 800);
+            homingState = HomingState::HomeZ_Slow;
+        }
+        break;
+
+    case HomingState::HomeZ_Slow:
+        stepperZ.run();
+        if (isZEndstopActive()) {
+            stepperZ.stop();
+            stepperZ.setCurrentPosition(0);
+            homedZ = true;
+
+            homedAll = true;
+            homingActive = false;
+            homingState = HomingState::Done;
+        }
+        break;
+
+    case HomingState::Done:
+    case HomingState::Error:
+    case HomingState::Idle:
+    default:
+        break;
+    }
+}
+void MPC_01::stopHoming() {
+    homingActive = false;
+
+    stepperX.stop();
+    stepperY.stop();
+    stepperZ.stop();
+}
+void MPC_01::stopHoming() {
+    homingActive = false;
+
+    stepperX.stop();
+    stepperY.stop();
+    stepperZ.stop();
+}
+
+//  Calibration
 
 void MPC_01::calibrate(int8_t Multiplikator){
     
@@ -150,6 +326,8 @@ uint8_t MPC_01::getMaxY(){
 uint8_t MPC_01::getMaxZ(){    
     return maxZ;
 }
+
+//  Status verarbeitung
 
 bool MPC_01::setStatus(uint8_t mode) {
   return i2c.writeBytes(0x10, &mode, 1);
