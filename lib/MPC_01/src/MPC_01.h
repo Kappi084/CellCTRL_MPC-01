@@ -36,9 +36,6 @@ class MPC_01{
         void setMoveSpeed(int speed);
         void setMoveAcceleration(int accel);
 
-        void setGripper(bool state);
-        void setTurnValue(int Turnval);
-        void setTurnSpeed(int speed);
 
         void applyMotionStepper();
         void updateMotion();
@@ -46,7 +43,6 @@ class MPC_01{
         void moveToSync();
 
         bool setStatus(uint8_t mode);
-        void setservo(uint8_t ch, uint16_t pulse);
 
         void sendRS485Text(const char* text);
         void updateRS485();
@@ -63,37 +59,14 @@ class MPC_01{
         void clearEStop();
         bool isEStopActive() const;
 
-        enum class HomingState : uint8_t {
-            Idle,
-            Start,
-            checkEndstops,
 
-            HomeX_Fast,
-            HomeX_Backoff,
-            HomeX_Slow,
 
-            HomeY_Fast,
-            HomeY_Backoff,
-            HomeY_Slow,
-
-            HomeZ_Fast,
-            HomeZ_Backoff,
-            HomeZ_Slow,
-
-            Done,
-            Error
-        }
-        homingState = HomingState::Idle;
 
         bool homingActive = false;
         bool homedX = false;
         bool homedY = false;
         bool homedZ = false;
         bool homedAll = false;
-
-        bool isXEndstopActive();
-        bool isYEndstopActive();
-        bool isZEndstopActive();
 
     private:
         uint8_t maxAcceleration; //0-100%
@@ -120,6 +93,32 @@ class MPC_01{
 
         uint8_t maxX = 0, maxY = 0, maxZ = 0;
 
+
+
+        enum class HomingState : uint8_t {
+            Idle,
+            Start,
+            checkEndstops,
+
+            HomeX_Fast,
+            HomeX_Backoff,
+            HomeX_Slow,
+
+            HomeY_Fast,
+            HomeY_Backoff,
+            HomeY_Slow,
+
+            HomeZ_Fast,
+            HomeZ_Backoff,
+            HomeZ_Slow,
+
+            Done,
+            Error
+        }
+
+        homingState = HomingState::Idle;
+
+
         TMC2209Manager tmc;
         I2CManager i2c;
         Adafruit_PWMServoDriver pca = Adafruit_PWMServoDriver(0x40);
@@ -138,6 +137,19 @@ class MPC_01{
         float maxSpeedSteps = 800.0;
         float accelSteps = 400.0;
         int8_t isEStopActive;
+        
+        enum class MachineState : uint8_t {
+            Boot,
+            Homing,
+            Ready,
+            Auto,
+            Manual,
+            Moving,
+            EStop,
+            Error
+        }
+
+        machineState = MachineState::Boot;
 
 };
 
